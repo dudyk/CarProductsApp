@@ -22,5 +22,9 @@
     <ProjectReference Include="..\CarProduct.Persistence\CarProduct.Persistence.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="App_Data\" />
+  </ItemGroup>
+
 
 </Project>

@@ -1,6 +1,10 @@
-﻿using System.Threading.Tasks;
+﻿using CarProduct.Application.Settings;
 using CarProduct.Client;
+using CarProduct.Client.Models;
+using CarProduct.Persistence.Enums;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using System.Threading.Tasks;
 
 namespace CarProduct.Api.Controllers
 {
@@ -8,21 +12,28 @@ namespace CarProduct.Api.Controllers
     [ApiController]
     public class TestController : ControllerBase
     {
-        private readonly ICarsClient _carsClient;
+        private readonly CarsClientSettings _settings;
 
-        public TestController(ICarsClient carsClient)
+        public TestController(IOptions<CarsClientSettings> settings)
         {
-            _carsClient = carsClient;
+            _settings = settings.Value;
         }
 
         [HttpGet]
         public async Task RunTest()
         {
-            var cl = new CarsClient();
+            var cl = new CarsClient(_settings.Url, _settings.UserName, _settings.Password);
 
-            await cl.GetProduct("vehicledetail/4758465e-ba52-422e-8ea4-cfef87b02445/");
-
-            
+            await cl.GetProductsPage(new GetProductsPageRequest
+            {
+                StockType = StockTypes.Used.ToString(),
+                Make = "tesla",
+                Model = "tesla-model_s",
+                Price = "100000",
+                DistanceMiles = "all",
+                Zip = "94596",
+                PageCount = 1,
+            });
         }
     }
 }

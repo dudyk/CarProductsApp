@@ -36,8 +36,7 @@ namespace CarProduct.Application.CommandHandlers
             
             _backgroundTaskQueue.QueueBackgroundWorkItem(async _ =>
             {
-                for (var i = 1; i <= request.PagesCountForScrape; i++)
-                    await _createProductsPageQueueWorkItem.DoWork(scrapeRequestId, i);
+                await _createProductsPageQueueWorkItem.DoWork(scrapeRequestId);
             });
             
             return Task.FromResult(scrapeRequestId);

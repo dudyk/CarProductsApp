@@ -7,6 +7,7 @@ namespace CarProduct.Persistence.Enums
         [Description("New & used cars")] All = 1,
         [Description("New & certified cars")] New_Cpo = 2,
         [Description("New cars")] New = 3,
-        [Description("Certified cars")] Cpo = 4,
+        [Description("Used cars")] Used = 4,
+        [Description("Certified cars")] Cpo = 5,
     }
 }

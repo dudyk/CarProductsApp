@@ -1,18 +1,18 @@
-﻿using CarProduct.Application.QueueWorkItems;
+﻿using AutoMapper;
+using CarProduct.Application.Helpers;
+using CarProduct.Application.QueueWorkItems;
+using CarProduct.Client;
+using CarProduct.Client.Models;
 using CarProduct.Infrastructure.Queue;
+using CarProduct.Persistence.Enums;
+using CarProduct.Persistence.Models;
+using CarProduct.Persistence.Repositories.ProductsPage;
 using CarProduct.Persistence.Repositories.ScrapeRequest;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using AutoMapper;
-using CarProduct.Application.Helpers;
-using CarProduct.Client;
-using CarProduct.Client.Models;
-using CarProduct.Persistence.Enums;
-using CarProduct.Persistence.Models;
-using CarProduct.Persistence.Repositories.ProductsPage;
 
 namespace CarProduct.Application.Services
 {
@@ -44,32 +44,32 @@ namespace CarProduct.Application.Services
             _mapper = mapper;
         }
 
-        public async Task StartProcessing(int scrapeRequestId, int pageNumber)
+        public async Task StartProcessing(int scrapeRequestId)
         {
             if (scrapeRequestId == 0)
                 throw new ArgumentNullException(nameof(scrapeRequestId));
 
-            if (pageNumber == 0)
-                throw new ArgumentNullException(nameof(pageNumber));
-
-            var scrapeRequest = _scrapeRequestRepository.GetByIdWithProductsPage(scrapeRequestId, pageNumber);
+            var scrapeRequest = _scrapeRequestRepository.GetByIdWithProductsPage(scrapeRequestId);
             if (scrapeRequest is null)
             {
                 _logger.LogWarning($"ScrapeRequest with '{scrapeRequestId}' Id not exists");
                 return;
             }
 
-            var productsPage = scrapeRequest.ProductsPages
-                .FirstOrDefault(r => r.Order == pageNumber);
+            var request = _mapper.Map<GetProductsPageRequest>(scrapeRequest);
+            var productsPageSnapshots = await _carsClient.GetProductsPage(request);
+
+            /*var productsPage = scrapeRequest.ProductsPages
+                .FirstOrDefault(r => r.Order == pageCount);
 
             if (productsPage is null)
             {
-                productsPage = new ProductsPage { Order = pageNumber };
+                productsPage = new ProductsPage { Order = pageCount };
                 scrapeRequest.ProductsPages.Add(productsPage);
             }
 
             if (productsPage.ProcessingStatus.IsAvailable())
-                throw new InvalidOperationException($"ProductsPage with '{pageNumber}' Number has incorrect '{productsPage.ProcessingStatus}' status");
+                throw new InvalidOperationException($"ProductsPage with '{pageCount}' Number has incorrect '{productsPage.ProcessingStatus}' status");
 
             productsPage.ProcessingStatus = ProcessingStatus.Processing;
             _productsPageRepository.Update(productsPage);
@@ -78,10 +78,10 @@ namespace CarProduct.Application.Services
             try
             {
                 var request = _mapper.Map<GetProductsPageRequest>(scrapeRequest);
-                request.PageNumber = pageNumber;
+                request.PageCount = pageCount;
 
-                var productsPageSnapshot = await _carsClient.GetProductsPage(request);
-                UpdateProductsPageModel(productsPage, productsPageSnapshot);
+                var productsPageSnapshots = await _carsClient.GetProductsPage(request);
+                UpdateProductsPageModel(productsPage, productsPageSnapshots);
                 productVehicleIds.AddRange(productsPage.Products.Select(r => r.VehicleId));
 
                 productsPage.ProcessingStatus = ProcessingStatus.Succeeded;
@@ -94,18 +94,20 @@ namespace CarProduct.Application.Services
                 _productsPageRepository.Update(productsPage);
 
                 _logger.LogError(exception, $"{nameof(StartProcessing)} {nameof(ProductsPage)} is failed");
-            }
+            }*/
 
             _backgroundTaskQueue.QueueBackgroundWorkItem(async _ =>
             {
-                foreach (var item in productVehicleIds)
-                    await _createProductQueueWorkItem.DoWork(item);
+                //foreach (var item in productsPageSnapshots.Select(r => r.VehicleId))
+                //    await _createProductQueueWorkItem.DoWork(item);
             });
         }
 
-        private void UpdateProductsPageModel(ProductsPage productsPage, ProductsPageSnapshot productsPageSnapshot)
+        private void UpdateProductsPageModel(ProductsPage productsPage, IEnumerable<ProductsPageSnapshot> productsPageSnapshots)
         {
-            _mapper.Map(productsPageSnapshot, productsPage);
+            foreach (var item in productsPageSnapshots)
+                _mapper.Map(item, productsPage);
+
         }
     }
 }

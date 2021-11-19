@@ -13,12 +13,12 @@ namespace CarProduct.Application.QueueWorkItems
             _scopeFactory = scopeFactory;
         }
 
-        public async Task DoWork(int scrapeRequestId, int pageNumber)
+        public async Task DoWork(int scrapeRequestId)
         {
             using var scope = _scopeFactory.CreateScope();
 
             var productsPageCreateService = scope.ServiceProvider.GetRequiredService<ProductsPageCreateService>();
-            await productsPageCreateService.StartProcessing(scrapeRequestId, pageNumber);
+            await productsPageCreateService.StartProcessing(scrapeRequestId);
         }
     }
 }

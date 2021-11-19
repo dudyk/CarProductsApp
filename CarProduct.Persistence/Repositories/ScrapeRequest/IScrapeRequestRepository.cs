@@ -2,6 +2,6 @@
 {
     public interface IScrapeRequestRepository : IRepositoryBase<Models.ScrapeRequest>
     {
-        Models.ScrapeRequest GetByIdWithProductsPage(int entityId, int pageNumber);
+        Models.ScrapeRequest GetByIdWithProductsPage(int entityId);
     }
 }

@@ -30,10 +30,12 @@ namespace CarProduct.Application
 
         private static IServiceCollection AddCarsClient(IServiceCollection services, IConfiguration configuration)
         {
-            services.AddSingleton<ICarsClient, CarsClient>();
-
             services.AddOptions()
                 .Configure<CarsClientSettings>(configuration.GetSection("CarsClientSettings"));
+
+            var settings = configuration.GetSection("CarsClientSettings").Get<CarsClientSettings>();
+
+            services.AddSingleton<ICarsClient>((_) => new CarsClient(settings.Url, settings.UserName, settings.Password));
 
             return services;
         }

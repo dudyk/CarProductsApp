@@ -2,148 +2,168 @@
 using CefSharp;
 using CefSharp.OffScreen;
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace CarProduct.Client
 {
     public class CarsClient : ICarsClient
     {
-        /*private readonly CarsClientSettings _carsClientSettings;
+        private readonly string _carsUrl;
+        private readonly string _userName;
+        private readonly string _password;
 
-        public CarsClient(IOptions<CarsClientSettings> carsClientSettings)
+        private int _currentPage = 1;
+        private const string ExitKey = "exitKey";
+        private const string DirectoryPath = "App_Data";
+
+        public CarsClient(string carsUrl, string userName, string password)
         {
-            _carsClientSettings = carsClientSettings.Value;
-        }*/
+            _carsUrl = carsUrl;
+            _userName = userName;
+            _password = password;
+        }
 
-
-
-        private readonly string HasSigInLinkScript = @"
-            function hasSignInLink() {
-                return document.querySelector('a.header-signin') !== null
-            }
-            hasSignInLink();";
-
-        private readonly string ClickSignInLink = @"
-            function clickSignInLink() {
-                document.querySelector('a.header-signin').click();
-            }
-            clickSignInLink();";
-
-        private readonly string HasSigInFormScript = @"
-            function hasSignInForm() {
-                return document.querySelector('form input#email') !== null
-                        && document.querySelector('form input#password') !== null;
-            }
-            hasSignInForm();";
-
-        private readonly string SetSignInFormAndSubmitScript = @"
-            function setSignInFormAndSubmit() {
-                document.querySelector('input#email').value = 'johngerson808@gmail.com';
-                document.querySelector('input#password').value = 'test8008';
-                document.querySelector('form.session-form').submit();
-            }
-            setSignInFormAndSubmit();";
-
-        private readonly string HasSearchFormScript = @"
-            function hasSearchForm() {
-                return document.querySelector('form.search-form') !== null;
-            }
-            hasSearchForm();";
-
-        private readonly string SetSearchFormAndSubmitScript = @"
-            function setSearchFormAndSubmit() {
-                document.querySelector('form select#make-model-search-stocktype').value = 'used';
-                document.querySelector('form select#makes').value = 'tesla';
-                document.querySelector('form select#models').value = 'tesla-model_s';
-                document.querySelector('form select#make-model-max-price').value = '100000';
-                document.querySelector('form select#make-model-maximum-distance').value = 'all';
-                document.querySelector('form input#make-model-zip').value = '94596';
-                document.querySelector('form.search-form').submit();
-            }
-            setSearchFormAndSubmit();";
-
-        public Task<ProductsPageSnapshot> GetProductsPage(GetProductsPageRequest scrapeRequest)
+        public async Task<IEnumerable<ProductsPageSnapshot>> GetProductsPage(GetProductsPageRequest request)
         {
-            throw new NotImplementedException();
+            var settings = new CefSettings { CachePath = Path.Combine(DirectoryPath, "Cache") };
+
+            var success = await Cef.InitializeAsync(settings, true, null);
+            if (!success)
+                throw new Exception("Unable to initialize CEF, check the log file.");
+
+            var browser = new ChromiumWebBrowser(_carsUrl);
+
+            var initialLoadResponse = await browser.WaitForInitialLoadAsync();
+            if (!initialLoadResponse.Success)
+                throw new Exception($"Page load failed with ErrorCode:{initialLoadResponse.ErrorCode}, HttpStatusCode:{initialLoadResponse.HttpStatusCode}");
+
+            var actions = new ConcurrentDictionary<string, Func<Task<string>>>();
+            actions.TryAdd(nameof(CheckSignedInCookie), () => CheckSignedInCookie(browser));
+            actions.TryAdd(nameof(HasSignInLinkAndClick), () => HasSignInLinkAndClick(browser));
+            actions.TryAdd(nameof(HasSignInFormThenSetAndSubmit), () => HasSignInFormThenSetAndSubmit(browser));
+            actions.TryAdd(nameof(HasSearchFormThenSetAndSubmit), () => HasSearchFormThenSetAndSubmit(browser, request));
+            actions.TryAdd(nameof(HasChangePageLinkScript), () => HasChangePageLinkScript(browser, request.PageCount));
+
+            var nextActionName = nameof(HasSignInLinkAndClick);
+            browser.LoadingStateChanged += async (_, args) =>
+            {
+                if (args.IsLoading) return;
+
+                if (nextActionName is ExitKey) Cef.Shutdown();
+
+                actions.TryGetValue(nextActionName, out var action);
+                if (action is null) return;
+
+                var actionResult = await action.Invoke();
+                if (actionResult is null) return;
+                
+                nextActionName = actionResult;
+            };
+
+            return null;
         }
 
         public async Task<ProductSnapshot> GetProduct(string vehicleId)
         {
-            var settings = new CefSettings
+            throw new NotImplementedException();
+        }
+
+        private async Task<string> CheckSignedInCookie(IWebBrowser browser)
+        {
+            var cookieManager = browser.GetCookieManager();
+            var cookies = await cookieManager.VisitAllCookiesAsync();
+            var carsLeggedInCookieValue = cookies
+                .FirstOrDefault(r => r.Name
+                    .Equals("CARS_logged_in", StringComparison.InvariantCultureIgnoreCase))
+                ?.Value;
+
+            var isSignedIn = !string.IsNullOrEmpty(carsLeggedInCookieValue)
+                             && Convert.ToBoolean(carsLeggedInCookieValue);
+
+            return isSignedIn
+                ? nameof(HasSearchFormThenSetAndSubmit)
+                : nameof(HasSignInFormThenSetAndSubmit);
+        }
+
+        private async Task<string> HasSignInLinkAndClick(IWebBrowser browser)
+        {
+            var result = await browser.EvaluateScriptAsync(CarScriptHelper.GetHasSignInLinkScript());
+
+            if (result.Success && Convert.ToBoolean(result.Result))
             {
-                //By default CefSharp will use an in-memory cache, you need to specify a Cache Folder to persist data
-                //CachePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CefSharp\\Cache")
-            };
-
-            //Perform dependency check to make sure all relevant resources are in our output directory.
-            var success = await Cef.InitializeAsync(settings, performDependencyCheck: true, browserProcessHandler: null);
-
-            if (!success)
-                throw new Exception("Unable to initialize CEF, check the log file.");
-
-            var waitMainPageLoaded = true;
-            var waitLoginPageLoaded = false;
-            var waitSearchPageLoaded = false;
-            var waitSearchResultPageLoaded = false;
-
-            var browser = new ChromiumWebBrowser("https://www.cars.com/");
-
-            var initialLoadResponse = await browser.WaitForInitialLoadAsync();
-
-            if (!initialLoadResponse.Success)
-                throw new Exception($"Page load failed with ErrorCode:{initialLoadResponse.ErrorCode}, HttpStatusCode:{initialLoadResponse.HttpStatusCode}");
-
-            browser.LoadingStateChanged += async (sender, args) =>
-            {
-                if (!args.IsLoading)
-                {
-                    if (waitMainPageLoaded)
-                    {
-                        var result = await browser.EvaluateScriptAsync(HasSigInLinkScript);
-
-                        if (result.Success && Convert.ToBoolean(result.Result))
-                        {
-                            await browser.EvaluateScriptAsync(ClickSignInLink);
-                         
-                            waitMainPageLoaded = false;
-                            waitLoginPageLoaded = true;
-                        }
-                    }
-
-                    if (waitLoginPageLoaded)
-                    {
-                        var result = await browser.EvaluateScriptAsync(HasSigInFormScript);
-
-                        if (result.Success && Convert.ToBoolean(result.Result))
-                        {
-                            await browser.EvaluateScriptAsync(SetSignInFormAndSubmitScript);
-
-                            waitLoginPageLoaded = false;
-                            waitSearchPageLoaded = true;
-                        }
-                    }
-
-                    if (waitSearchPageLoaded)
-                    {
-                        var result = await browser.EvaluateScriptAsync(HasSearchFormScript);
-
-                        if (result.Success && Convert.ToBoolean(result.Result))
-                        {
-                            await browser.EvaluateScriptAsync(SetSearchFormAndSubmitScript);
-
-                            waitSearchPageLoaded = false;
-                            waitSearchResultPageLoaded = true;
-                        }
-                    }
-
-                    if (waitSearchPageLoaded)
-                    {
-                        // TODO
-                    }
-                }
-            };
+                await browser.EvaluateScriptAsync(CarScriptHelper.GetClickSignInLinkScript());
+                return nameof(HasSignInFormThenSetAndSubmit);
+            }
 
             return null;
+        }
+
+        private async Task<string> HasSignInFormThenSetAndSubmit(IWebBrowser browser)
+        {
+            var result = await browser.EvaluateScriptAsync(CarScriptHelper.GetHasSignInFormScript());
+
+            if (result.Success && Convert.ToBoolean(result.Result))
+            {
+                await browser.EvaluateScriptAsync(CarScriptHelper.GetSetSignInFormAndSubmitScript(_userName, _password));
+                return nameof(HasSearchFormThenSetAndSubmit);
+            }
+
+            return null;
+        }
+
+        private async Task<string> HasSearchFormThenSetAndSubmit(IWebBrowser browser, GetProductsPageRequest request)
+        {
+            var result = await browser.EvaluateScriptAsync(CarScriptHelper.GetHasSearchFormScript());
+
+            if (result.Success && Convert.ToBoolean(result.Result))
+            {
+                var script = CarScriptHelper.GetSetSearchFormAndSubmitScript(
+                    request.StockType, request.Make, request.Model, request.Price, request.DistanceMiles, request.Zip);
+                await browser.EvaluateScriptAsync(script);
+
+                return nameof(HasChangePageLinkScript);
+            }
+
+            return null;
+        }
+
+        private async Task<string> HasChangePageLinkScript(ChromiumWebBrowser browser, int pageCount)
+        {
+            if (pageCount == _currentPage) return ExitKey;
+
+            var filePath = $"screenShot-Page-{_currentPage}";
+            await TakeScreenShot(browser, filePath);
+
+            var result = await browser.EvaluateScriptAsync(CarScriptHelper.GetHasChangePageLinkScript(_currentPage));
+
+            // TODO get all products vehicleIds
+
+            if (result.Success && Convert.ToBoolean(result.Result))
+            {
+                _currentPage++;
+
+                await browser.EvaluateScriptAsync(CarScriptHelper.GetChangePageScript(_currentPage));
+                return nameof(HasChangePageLinkScript);
+            }
+
+            return null;
+        }
+
+        private static async Task TakeScreenShot(ChromiumWebBrowser browser, string fileName)
+        {
+            var result = await browser.ScreenshotAsync();
+
+            if (!Directory.Exists(DirectoryPath))
+                Directory.CreateDirectory(DirectoryPath);
+
+            var filePath = Path.Combine(DirectoryPath, $"{fileName}.png");
+            result.Save(filePath);
+
+            result.Dispose();
         }
     }
 }

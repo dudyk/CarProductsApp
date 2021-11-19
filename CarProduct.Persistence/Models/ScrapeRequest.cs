@@ -10,9 +10,9 @@ namespace CarProduct.Persistence.Models
         public StockTypes StockType { get; set; }
         public string Make { get; set; }
         public string Model { get; set; }
-        public decimal? Price { get; set; }
-        public double DistanceMiles { get; set; }
-        public int? Zip { get; set; }
+        public string Price { get; set; }
+        public string DistanceMiles { get; set; }
+        public string Zip { get; set; }
         public int PagesCountForScrape { get; set; }
         
         public ICollection<ProductsPage> ProductsPages { get; set; } = new HashSet<ProductsPage>();

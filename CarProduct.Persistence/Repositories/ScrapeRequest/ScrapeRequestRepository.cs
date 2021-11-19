@@ -1,5 +1,4 @@
-﻿using System.Linq;
-using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Options;
 
 namespace CarProduct.Persistence.Repositories.ScrapeRequest
 {
@@ -10,14 +9,13 @@ namespace CarProduct.Persistence.Repositories.ScrapeRequest
         {
         }
 
-        public Models.ScrapeRequest GetByIdWithProductsPage(int entityId, int pageNumber)
+        public Models.ScrapeRequest GetByIdWithProductsPage(int entityId)
         {
             using var scrapeRequestDb = new BaseCollection(Configs);
 
             return scrapeRequestDb.Collection
                 .Query()
-                .Include(r => r.ProductsPages
-                    .Where(p => p.Order == pageNumber))
+                .Include(r => r.ProductsPages)
                 .Where(r => r.Id == entityId)
                 .FirstOrDefault();
         }
