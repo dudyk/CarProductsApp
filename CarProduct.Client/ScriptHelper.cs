@@ -1,6 +1,6 @@
 ﻿namespace CarProduct.Client
 {
-    public static class CarScriptHelper
+    public static class ScriptHelper
     {
         private const string HasSignInLinkScriptTemplate = @"
             function hasSignInLink() {
@@ -54,10 +54,17 @@
             hasSearchForm();";
         
         private const string ChangePageScriptTemplate = @"
-            function hasSearchForm() {{
-                return document.querySelector('a#pagination-direct-link-{0}') !== null;
+            function changeSearchPage() {{
+                document.querySelector('a#pagination-direct-link-{0}').click();
             }}
-            hasSearchForm();";
+            changeSearchPage();";
+        
+        private const string GetVehicleUrlsTemplate = @"
+            function getVehicleUrls() {{
+                var links = document.querySelectorAll('.vehicle-card > a');
+                return [...links].map(r => r.href);
+            }}
+            getVehicleUrls();";
 
         public static string GetHasSignInLinkScript() => HasSignInLinkScriptTemplate;
         public static string GetClickSignInLinkScript() => ClickSignInLinkScriptTemplate;
@@ -67,8 +74,8 @@
         public static string GetHasSearchFormScript() => HasSearchFormScriptTemplate;
         public static string GetSetSearchFormAndSubmitScript(string stockType, string make, string model, string price, string distanceMiles, string zip) =>
             string.Format(SetSearchFormAndSubmitScriptTemplate, stockType, make, model, price, distanceMiles, zip);
-
         public static string GetHasChangePageLinkScript(int pageNumber) => string.Format(HasChangePageLinkScriptTemplate, pageNumber);
         public static string GetChangePageScript(int pageNumber) => string.Format(ChangePageScriptTemplate, pageNumber);
+        public static string GetGetVehicleUrlsScript() => GetVehicleUrlsTemplate;
     }
 }

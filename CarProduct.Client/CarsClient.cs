@@ -6,6 +6,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace CarProduct.Client
@@ -16,7 +18,6 @@ namespace CarProduct.Client
         private readonly string _userName;
         private readonly string _password;
 
-        private int _currentPage = 1;
         private const string ExitKey = "exitKey";
         private const string DirectoryPath = "App_Data";
 
@@ -27,9 +28,19 @@ namespace CarProduct.Client
             _password = password;
         }
 
-        public async Task<IEnumerable<ProductsPageSnapshot>> GetProductsPage(GetProductsPageRequest request)
+        public async Task<ProductSnapshot> GetProduct(string vehicleId)
         {
-            var settings = new CefSettings { CachePath = Path.Combine(DirectoryPath, "Cache") };
+            throw new NotImplementedException();
+        }
+
+        public async Task<ProductsPageSnapshots> GetProductsPage(GetProductsPageRequest request)
+        {
+            var snapshots = new ProductsPageSnapshots();
+
+            var settings = new CefSettings
+            {
+                //CachePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), DirectoryPath, "Cache")
+            };
 
             var success = await Cef.InitializeAsync(settings, true, null);
             if (!success)
@@ -41,35 +52,44 @@ namespace CarProduct.Client
             if (!initialLoadResponse.Success)
                 throw new Exception($"Page load failed with ErrorCode:{initialLoadResponse.ErrorCode}, HttpStatusCode:{initialLoadResponse.HttpStatusCode}");
 
+            var tokenSource = new CancellationTokenSource();
             var actions = new ConcurrentDictionary<string, Func<Task<string>>>();
             actions.TryAdd(nameof(CheckSignedInCookie), () => CheckSignedInCookie(browser));
             actions.TryAdd(nameof(HasSignInLinkAndClick), () => HasSignInLinkAndClick(browser));
             actions.TryAdd(nameof(HasSignInFormThenSetAndSubmit), () => HasSignInFormThenSetAndSubmit(browser));
             actions.TryAdd(nameof(HasSearchFormThenSetAndSubmit), () => HasSearchFormThenSetAndSubmit(browser, request));
-            actions.TryAdd(nameof(HasChangePageLinkScript), () => HasChangePageLinkScript(browser, request.PageCount));
+            foreach (var page in Enumerable.Range(1, request.PageCount))
+                actions.TryAdd($"{nameof(GatherSearchPageData)}[{page}]", () => GatherSearchPageData(browser, page, snapshots, tokenSource));
 
-            var nextActionName = nameof(HasSignInLinkAndClick);
-            browser.LoadingStateChanged += async (_, args) =>
+            var processingTaskSource = new TaskCompletionSource<bool>();
+            var processingTask = processingTaskSource.Task;
+            await Task.Factory.StartNew(() =>
             {
-                if (args.IsLoading) return;
+                var nextActionName = nameof(HasSignInLinkAndClick);
+                browser.LoadingStateChanged += async (_, args) =>
+                {
+                    if (args.IsLoading) return;
 
-                if (nextActionName is ExitKey) Cef.Shutdown();
+                    if (nextActionName is ExitKey)
+                    {
+                        Cef.Shutdown();
+                        processingTaskSource.SetResult(true);
 
-                actions.TryGetValue(nextActionName, out var action);
-                if (action is null) return;
+                        // todo resolve exit
+                    }
 
-                var actionResult = await action.Invoke();
-                if (actionResult is null) return;
-                
-                nextActionName = actionResult;
-            };
+                    actions.TryGetValue(nextActionName, out var action);
+                    if (action is null) return;
 
-            return null;
-        }
+                    var actionResult = await action.Invoke();
+                    if (actionResult is null) return;
 
-        public async Task<ProductSnapshot> GetProduct(string vehicleId)
-        {
-            throw new NotImplementedException();
+                    nextActionName = actionResult;
+                };
+            });
+
+            await processingTask;
+            return snapshots;
         }
 
         private async Task<string> CheckSignedInCookie(IWebBrowser browser)
@@ -91,11 +111,11 @@ namespace CarProduct.Client
 
         private async Task<string> HasSignInLinkAndClick(IWebBrowser browser)
         {
-            var result = await browser.EvaluateScriptAsync(CarScriptHelper.GetHasSignInLinkScript());
+            var result = await browser.EvaluateScriptAsync(ScriptHelper.GetHasSignInLinkScript());
 
             if (result.Success && Convert.ToBoolean(result.Result))
             {
-                await browser.EvaluateScriptAsync(CarScriptHelper.GetClickSignInLinkScript());
+                await browser.EvaluateScriptAsync(ScriptHelper.GetClickSignInLinkScript());
                 return nameof(HasSignInFormThenSetAndSubmit);
             }
 
@@ -104,11 +124,11 @@ namespace CarProduct.Client
 
         private async Task<string> HasSignInFormThenSetAndSubmit(IWebBrowser browser)
         {
-            var result = await browser.EvaluateScriptAsync(CarScriptHelper.GetHasSignInFormScript());
+            var result = await browser.EvaluateScriptAsync(ScriptHelper.GetHasSignInFormScript());
 
             if (result.Success && Convert.ToBoolean(result.Result))
             {
-                await browser.EvaluateScriptAsync(CarScriptHelper.GetSetSignInFormAndSubmitScript(_userName, _password));
+                await browser.EvaluateScriptAsync(ScriptHelper.GetSetSignInFormAndSubmitScript(_userName, _password));
                 return nameof(HasSearchFormThenSetAndSubmit);
             }
 
@@ -117,37 +137,45 @@ namespace CarProduct.Client
 
         private async Task<string> HasSearchFormThenSetAndSubmit(IWebBrowser browser, GetProductsPageRequest request)
         {
-            var result = await browser.EvaluateScriptAsync(CarScriptHelper.GetHasSearchFormScript());
+            var result = await browser.EvaluateScriptAsync(ScriptHelper.GetHasSearchFormScript());
 
             if (result.Success && Convert.ToBoolean(result.Result))
             {
-                var script = CarScriptHelper.GetSetSearchFormAndSubmitScript(
+                var script = ScriptHelper.GetSetSearchFormAndSubmitScript(
                     request.StockType, request.Make, request.Model, request.Price, request.DistanceMiles, request.Zip);
                 await browser.EvaluateScriptAsync(script);
 
-                return nameof(HasChangePageLinkScript);
+                return $"{nameof(GatherSearchPageData)}[{1}]";
             }
 
             return null;
         }
 
-        private async Task<string> HasChangePageLinkScript(ChromiumWebBrowser browser, int pageCount)
+        private async Task<string> GatherSearchPageData(ChromiumWebBrowser browser, int currentPage, ProductsPageSnapshots snapshots, CancellationTokenSource tokenSource)
         {
-            if (pageCount == _currentPage) return ExitKey;
+            var pageLinkResponse = await browser.EvaluateScriptAsync(ScriptHelper.GetHasChangePageLinkScript(currentPage));
+            if (pageLinkResponse.Success && pageLinkResponse.Result is null || tokenSource.Token.IsCancellationRequested)
+                return null;
 
-            var filePath = $"screenShot-Page-{_currentPage}";
-            await TakeScreenShot(browser, filePath);
+            tokenSource.Cancel();
 
-            var result = await browser.EvaluateScriptAsync(CarScriptHelper.GetHasChangePageLinkScript(_currentPage));
-
-            // TODO get all products vehicleIds
-
-            if (result.Success && Convert.ToBoolean(result.Result))
+            var vehiclesResponse = await browser.EvaluateScriptAsync(ScriptHelper.GetGetVehicleUrlsScript());
+            if (vehiclesResponse.Success && vehiclesResponse.Result is IEnumerable<dynamic> vehicleIds)
             {
-                _currentPage++;
+                var filePath = $"ScreenShot-Page-{currentPage}";
+                await TakeScreenShot(browser, filePath);
 
-                await browser.EvaluateScriptAsync(CarScriptHelper.GetChangePageScript(_currentPage));
-                return nameof(HasChangePageLinkScript);
+                snapshots.Items.Add(new ProductsPageSnapshot
+                {
+                    PageNumber = currentPage,
+                    ScreenShotFileName = filePath,
+                    VehicleIds = vehicleIds
+                        .Select(r => new Uri(r).Segments[2].Replace("/", ""))
+                });
+
+                await browser.EvaluateScriptAsync(ScriptHelper.GetChangePageScript(currentPage));
+
+                return $"{nameof(GatherSearchPageData)}[{++currentPage}]";
             }
 
             return null;

@@ -20,6 +20,6 @@ namespace CarProduct.Persistence.Models
         public ScrapeRequest ScrapeRequest { get; set; }
 
         public IEnumerable<string> ProductVehicleIds { get; set; } = new HashSet<string>();
-        public ICollection<Product> Products { get; set; } = new HashSet<Product>();
+        //public ICollection<Product> Products { get; set; } = new HashSet<Product>();
     }
 }

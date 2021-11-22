@@ -96,11 +96,11 @@ namespace CarProduct.Application.Services
                 _logger.LogError(exception, $"{nameof(StartProcessing)} {nameof(ProductsPage)} is failed");
             }*/
 
-            _backgroundTaskQueue.QueueBackgroundWorkItem(async _ =>
-            {
-                //foreach (var item in productsPageSnapshots.Select(r => r.VehicleId))
-                //    await _createProductQueueWorkItem.DoWork(item);
-            });
+            foreach (var item in productsPageSnapshots.Items.SelectMany(r => r.VehicleIds))
+                _backgroundTaskQueue.QueueBackgroundWorkItem(async _ =>
+                {
+                    await _createProductQueueWorkItem.DoWork(item);
+                });
         }
 
         private void UpdateProductsPageModel(ProductsPage productsPage, IEnumerable<ProductsPageSnapshot> productsPageSnapshots)
